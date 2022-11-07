@@ -1,0 +1,73 @@
+From 0c0fbb00d57e80f1b844accc763ad91f2692b522 Mon Sep 17 00:00:00 2001
+From: Peter Yoon <peyo.hd@gmail.com>
+Date: Tue, 18 Oct 2022 14:07:54 +0900
+Subject: [PATCH] libbt: call hw_reset() in upio_set_bluetooth_power()
+
+  Workaround for bt_hci timeout. Information from following links :
+    https://github.com/raspberrypi/linux/issues/2832
+    https://github.com/raspberrypi/userland/blob/master/host_applications/linux/apps/vcmailbox/vcmailbox.c
+
+  libbt changes are suggested by Lidong Zhou <l1d000.zhou@gmail.com>
+
+Change-Id: Ic67eed2d60d9bea23323bbe82f824ea3afc4e674
+---
+ src/bt_vendor_brcm.c |  2 ++
+ src/upio.c           | 13 +++++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/src/bt_vendor_brcm.c b/src/bt_vendor_brcm.c
+index 01e89a2..9927ad8 100644
+--- a/src/bt_vendor_brcm.c
++++ b/src/bt_vendor_brcm.c
+@@ -152,7 +152,9 @@ static int op(bt_vendor_opcode_t opcode, void *param)
+                 if (*state == BT_VND_PWR_ON)
+                 {
+                     ALOGW("NOTE: BT_VND_PWR_ON now forces power-off first");
++                    usleep(200000);
+                     upio_set_bluetooth_power(UPIO_BT_POWER_ON);
++                    usleep(200000);
+                 } else {
+                     /* Make sure wakelock is released */
+                     hw_lpm_set_wake_state(false);
+diff --git a/src/upio.c b/src/upio.c
+index 5050393..388600d 100644
+--- a/src/upio.c
++++ b/src/upio.c
+@@ -39,6 +39,7 @@
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <time.h>
++#include <sys/ioctl.h>
+ 
+ /******************************************************************************
+ **  Constants & Macros
+@@ -275,6 +276,16 @@ void upio_cleanup(void)
+ #endif
+ }
+ 
++static void hw_reset(bool reset) {
++  unsigned buf[8] = { 8 * 4, 0, 0x38041, 8, 8, 128, 0, 0};
++  buf[6] = reset ? 0 : 1;
++  int fd = open("/dev/vcio", 0);
++  if (fd >= 0) {
++    ioctl(fd, _IOWR(100, 0, char *), buf);
++    close(fd);
++  }
++}
++
+ /*******************************************************************************
+ **
+ ** Function        upio_set_bluetooth_power
+@@ -297,10 +308,12 @@ int upio_set_bluetooth_power(int on)
+     {
+         case UPIO_BT_POWER_OFF:
+             buffer = '0';
++	    hw_reset(true);
+             break;
+ 
+         case UPIO_BT_POWER_ON:
+             buffer = '1';
++	    hw_reset(false);
+             break;
+     }
+ 
